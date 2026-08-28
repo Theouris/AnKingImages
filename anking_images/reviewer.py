@@ -7,6 +7,7 @@ from typing import Any
 
 from aqt import mw
 
+from .catalogue import CATALOGUE_FIELD
 from .core import (
     MINIMUM_ICON_SIZE_MARGIN,
     extract_systems,
@@ -97,6 +98,8 @@ def augment_card_html(
 
     try:
         note = card.note()
+        if CATALOGUE_FIELD in note:
+            return html
         note_id = int(note.id)
         card_id = int(card.id)
         field_map = fields_by_media(note.items())
@@ -276,6 +279,7 @@ def handle_js_message(
     _context: Any,
     store: SavedImageStore,
     gallery_refresh: Any = None,
+    catalogue_changed: Any = None,
 ) -> tuple[bool, Any]:
     if not message.startswith(MESSAGE_PREFIX):
         return handled
@@ -334,8 +338,19 @@ def handle_js_message(
             tags=tags,
         )
         is_saved = store.toggle(record)
+        sync_warning = ""
+        if callable(catalogue_changed):
+            try:
+                result = catalogue_changed()
+                if isinstance(result, str):
+                    sync_warning = result
+            except Exception as error:
+                sync_warning = str(error)
         if callable(gallery_refresh):
             gallery_refresh()
-        return True, {"saved": is_saved, "systems": list(record.systems)}
+        response = {"saved": is_saved, "systems": list(record.systems)}
+        if sync_warning:
+            response["syncWarning"] = sync_warning
+        return True, response
     except Exception as error:
         return True, {"saved": False, "error": str(error)}

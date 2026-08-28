@@ -64,6 +64,42 @@ def test_delete_removes_record_and_persists(tmp_path: Path) -> None:
     assert SavedImageStore(path).all() == []
 
 
+def test_favorite_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "saved_images.csv"
+    store = SavedImageStore(path)
+    record = make_record()
+    store.toggle(record)
+
+    assert store.set_favorite(record.record_id, True) is True
+    assert SavedImageStore(path).all()[0].favorite is True
+    assert store.set_favorite(record.record_id, False) is False
+    assert SavedImageStore(path).all()[0].favorite is False
+
+
+def test_old_csv_without_favorite_column_defaults_to_false(tmp_path: Path) -> None:
+    path = tmp_path / "saved_images.csv"
+    store = SavedImageStore(path)
+    store.toggle(make_record())
+    rows = list(csv.reader(path.open(newline="", encoding="utf-8")))
+    favorite_index = rows[0].index("favorite")
+    rows = [row[:favorite_index] + row[favorite_index + 1 :] for row in rows]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        csv.writer(handle).writerows(rows)
+
+    assert SavedImageStore(path).all()[0].favorite is False
+
+
+def test_replace_all_mirrors_remote_catalogue(tmp_path: Path) -> None:
+    path = tmp_path / "saved_images.csv"
+    store = SavedImageStore(path)
+    store.toggle(make_record(note_id=10))
+
+    replacement = make_record(note_id=11)
+    store.replace_all([replacement])
+
+    assert SavedImageStore(path).all() == [replacement]
+
+
 def test_malformed_row_does_not_hide_valid_rows(tmp_path: Path) -> None:
     path = tmp_path / "saved_images.csv"
     store = SavedImageStore(path)

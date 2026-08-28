@@ -32,6 +32,7 @@ CSV_COLUMNS = (
     "natural_height",
     "systems",
     "tags",
+    "favorite",
 )
 
 
@@ -58,6 +59,10 @@ def _int(value: object) -> int:
         return 0
 
 
+def _bool(value: object) -> bool:
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class SavedImage:
     record_id: str
@@ -77,6 +82,7 @@ class SavedImage:
     natural_height: int = 0
     systems: tuple[str, ...] = field(default_factory=tuple)
     tags: tuple[str, ...] = field(default_factory=tuple)
+    favorite: bool = False
 
     @classmethod
     def create(
@@ -140,6 +146,7 @@ class SavedImage:
             "natural_height": str(self.natural_height),
             "systems": _json_list(self.systems),
             "tags": _json_list(self.tags),
+            "favorite": "1" if self.favorite else "0",
         }
 
     @classmethod
@@ -169,6 +176,7 @@ class SavedImage:
             natural_height=_int(row.get("natural_height")),
             systems=_parse_list(row.get("systems", "")),
             tags=_parse_list(row.get("tags", "")),
+            favorite=_bool(row.get("favorite", "")),
         )
 
 
@@ -257,6 +265,35 @@ class SavedImageStore:
             del self._records[str(record_id)]
             self._write_locked()
             return True
+
+    def set_favorite(self, record_id: str, favorite: bool) -> bool:
+        """Set a record's favorite state and return its state afterward."""
+
+        with self._lock:
+            key = str(record_id)
+            if key not in self._records:
+                raise KeyError(key)
+            current = self._records[key]
+            desired = bool(favorite)
+            if current.favorite != desired:
+                self._records[key] = replace(current, favorite=desired)
+                self._write_locked()
+            return desired
+
+    def replace_all(self, records: Iterable[SavedImage]) -> None:
+        """Replace the catalogue and atomically rewrite the CSV."""
+
+        with self._lock:
+            self._records = {
+                record.record_id: replace(
+                    record,
+                    systems=record.systems or (UNCATEGORIZED_SYSTEM,),
+                )
+                for record in records
+                if record.note_id and (record.media_filename or record.image_src)
+            }
+            self.load_errors = []
+            self._write_locked()
 
     def _write_locked(self) -> None:
         temporary = self.csv_path.with_name(f".{self.csv_path.name}.tmp")
