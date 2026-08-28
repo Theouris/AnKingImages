@@ -8,10 +8,7 @@ system-grouped gallery. Only the selected image filenames/sources are stored in
 a suspended card in a standalone **AnKing Images** deck so the selection can
 travel through normal Anki sync.
 
-## Install
-
-Use the prebuilt `AnKingImages.ankiaddon` file, or copy/symlink this directory
-into Anki's `addons21` directory. Restart Anki after installing.
+This add-on only works for the Anking Step Deck
 
 ## Use
 
