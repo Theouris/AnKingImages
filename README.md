@@ -23,7 +23,9 @@ into Anki's `addons21` directory. Restart Anki after installing.
 3. Use the ☆ button on a gallery image to add it to the **Favorites** section at
    the top. Use ⇩ to export it as a PNG, or 🗑️ to remove it from the catalogue.
    Deleting a gallery entry does not delete the original Anki media file.
-4. Click a thumbnail for a resizable large view. Scroll or pinch on a mousepad
+4. Click **Sync** in the gallery when you are ready to copy the image IDs from
+   the local CSV into the suspended Anki catalogue card.
+5. Click a thumbnail for a resizable large view. Scroll or pinch on a mousepad
    to zoom; the native maximize/restore window control remains available.
 
 System sections are generated from the first child of tags matching
@@ -33,8 +35,10 @@ image is saved.
 
 The local CSV records the image ID, favorite state, save time, note/card IDs,
 deck, note type, source field, media filename, image text/dimensions, extracted
-systems, and the note's tags. Every save or delete rewrites the add-on's single
-suspended catalogue card as a compact list of filenames/sources. After
+systems, and the note's tags. Saving, unsaving, favoriting, and deleting images
+changes only this CSV; it does not modify Anki collection state. The gallery's
+**Sync** button explicitly writes the current selection to the add-on's single
+suspended catalogue card as a compact list of filenames/sources. After an Anki
 collection sync, that list updates the local selection, including removals made
 on another device. Favorites and rich display metadata remain local. Anki's
 special `user_files` directory preserves the local mirror across add-on updates.

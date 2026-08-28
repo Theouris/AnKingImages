@@ -76,7 +76,8 @@ QToolButton#ankingImagesSection:hover {
 }
 QPushButton#ankingImagesExport,
 QPushButton#ankingImagesFavorite,
-QPushButton#ankingImagesDelete {
+QPushButton#ankingImagesDelete,
+QPushButton#ankingImagesSync {
     background: #0e2b46;
     border: 1px solid rgba(238, 245, 255, 42);
     border-radius: 8px;
@@ -86,14 +87,22 @@ QPushButton#ankingImagesDelete {
 }
 QPushButton#ankingImagesExport:hover,
 QPushButton#ankingImagesFavorite:hover,
-QPushButton#ankingImagesDelete:hover {
+QPushButton#ankingImagesDelete:hover,
+QPushButton#ankingImagesSync:hover {
     background: #153b5d;
     border-color: #6aa6ff;
 }
 QPushButton#ankingImagesExport:pressed,
 QPushButton#ankingImagesFavorite:pressed,
-QPushButton#ankingImagesDelete:pressed {
+QPushButton#ankingImagesDelete:pressed,
+QPushButton#ankingImagesSync:pressed {
     background: #081a2b;
+}
+QPushButton#ankingImagesSync {
+    font-size: 14px;
+    font-weight: 650;
+    min-width: 76px;
+    padding: 8px 14px;
 }
 QPushButton#ankingImagesFavorite[isFavorite="true"] {
     color: #f2b705;

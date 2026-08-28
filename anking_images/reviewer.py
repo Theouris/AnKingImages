@@ -281,7 +281,6 @@ def handle_js_message(
     _context: Any,
     store: SavedImageStore,
     gallery_refresh: Any = None,
-    catalogue_changed: Any = None,
 ) -> tuple[bool, Any]:
     if not message.startswith(MESSAGE_PREFIX):
         return handled
@@ -340,19 +339,9 @@ def handle_js_message(
             tags=tags,
         )
         is_saved = store.toggle(record)
-        sync_warning = ""
-        if callable(catalogue_changed):
-            try:
-                result = catalogue_changed()
-                if isinstance(result, str):
-                    sync_warning = result
-            except Exception as error:
-                sync_warning = str(error)
         if callable(gallery_refresh):
             gallery_refresh()
         response = {"saved": is_saved, "systems": list(record.systems)}
-        if sync_warning:
-            response["syncWarning"] = sync_warning
         return True, response
     except Exception as error:
         return True, {"saved": False, "error": str(error)}

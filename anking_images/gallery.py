@@ -412,11 +412,11 @@ class GalleryDialog(QDialog):
         self,
         store: SavedImageStore,
         parent: QWidget,
-        on_catalogue_changed: Callable[[], object] | None = None,
+        on_sync_requested: Callable[[], object] | None = None,
     ) -> None:
         super().__init__(parent)
         self.store = store
-        self._on_catalogue_changed = on_catalogue_changed
+        self._on_sync_requested = on_sync_requested
         self.setObjectName("ankingImagesGallery")
         self.setStyleSheet(GALLERY_STYLESHEET)
         self.setWindowFlag(WINDOW_MIN_MAX_BUTTONS_HINT, True)
@@ -426,12 +426,25 @@ class GalleryDialog(QDialog):
         self.setSizeGripEnabled(True)
 
         root = QVBoxLayout(self)
+        heading_row = QHBoxLayout()
         heading = QLabel("My Images")
         heading.setObjectName("ankingImagesHeading")
-        root.addWidget(heading)
+        heading_row.addWidget(heading)
+        heading_row.addStretch(1)
+        self.sync_button = QPushButton("Sync")
+        self.sync_button.setObjectName("ankingImagesSync")
+        self.sync_button.setAccessibleName("Sync image catalogue to Anki")
+        self.sync_button.setToolTip(
+            "Copy the image IDs in the local CSV to the suspended Anki catalogue card"
+        )
+        self.sync_button.setEnabled(callable(self._on_sync_requested))
+        qconnect(self.sync_button.clicked, self._sync_catalogue)
+        heading_row.addWidget(self.sync_button)
+        root.addLayout(heading_row)
         description = QLabel(
             "Saved images are grouped by #AK_Step1_v12::^Systems tags. "
-            "Open a system to view its images."
+            "Open a system to view its images. Click Sync to copy the local "
+            "selection to Anki."
         )
         description.setObjectName("ankingImagesMuted")
         description.setWordWrap(True)
@@ -529,7 +542,6 @@ class GalleryDialog(QDialog):
             self.error_label.show()
             return
         self.refresh()
-        self._catalogue_changed()
 
     def _favorite_record(self, record: SavedImage) -> None:
         try:
@@ -540,18 +552,25 @@ class GalleryDialog(QDialog):
             return
         self.refresh()
 
-    def _catalogue_changed(self) -> None:
-        if not callable(self._on_catalogue_changed):
+    def _sync_catalogue(self) -> None:
+        if not callable(self._on_sync_requested):
             return
+        self.sync_button.setEnabled(False)
         try:
-            result = self._on_catalogue_changed()
+            result = self._on_sync_requested()
         except Exception as error:
             self.error_label.setText(
-                "The gallery was updated locally, but the Anki sync card could not "
-                f"be updated: {error}"
+                f"The image catalogue could not be synced to Anki: {error}"
             )
             self.error_label.show()
             return
+        finally:
+            self.sync_button.setEnabled(True)
         if isinstance(result, str) and result:
             self.error_label.setText(result)
             self.error_label.show()
+            return
+        self.error_label.hide()
+        count = len(self.store.all())
+        noun = "image ID" if count == 1 else "image IDs"
+        tooltip(f"Synced {count} {noun} to Anki.", parent=self)

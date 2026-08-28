@@ -32,7 +32,7 @@ def _refresh_visible_gallery() -> None:
         _gallery.refresh()
 
 
-def _write_catalogue_card() -> str:
+def _sync_catalogue_card() -> str:
     global _catalogue_error
     if mw.col is None:
         return "No Anki collection is open, so the sync card was not updated."
@@ -40,10 +40,7 @@ def _write_catalogue_card() -> str:
         CATALOGUE.write(mw.col)
     except Exception as error:
         _catalogue_error = str(error)
-        return (
-            "The gallery was updated locally, but the Anki sync card could not "
-            f"be updated: {error}"
-        )
+        return f"The image catalogue could not be synced to Anki: {error}"
     _catalogue_error = ""
     return ""
 
@@ -66,7 +63,7 @@ def _pull_catalogue_card() -> None:
 def _show_gallery() -> None:
     global _gallery
     if _gallery is None:
-        _gallery = GalleryDialog(STORE, mw, _write_catalogue_card)
+        _gallery = GalleryDialog(STORE, mw, _sync_catalogue_card)
     else:
         _gallery.refresh()
     if _catalogue_error:
@@ -117,7 +114,6 @@ def _on_js_message(
         context,
         STORE,
         _refresh_visible_gallery,
-        _write_catalogue_card,
     )
 
 

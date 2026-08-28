@@ -102,7 +102,7 @@ class CatalogueSync:
         return int(note.id)
 
     def write(self, collection: Any) -> int:
-        """Write the current CSV records into the suspended sync card."""
+        """Explicitly write the current CSV records into the suspended sync card."""
 
         previous_undo_step = self._previous_undo_step(collection)
         try:
