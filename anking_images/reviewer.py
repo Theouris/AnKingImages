@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
-from pathlib import Path
 from typing import Any
-from urllib.parse import unquote_to_bytes
 
 from aqt import mw
-from aqt.qt import QFileDialog, QPixmap
-from aqt.utils import showWarning, tooltip
 
 from .catalogue import CATALOGUE_FIELD
 from .core import (
@@ -25,7 +19,6 @@ from .storage import SavedImage, SavedImageStore
 
 
 MESSAGE_PREFIX = "anking-images:toggle:"
-EXPORT_MESSAGE_PREFIX = "anking-images:export-png:"
 SUPPORTED_CONTEXTS = {
     "reviewQuestion",
     "reviewAnswer",
@@ -46,14 +39,7 @@ STAR_STYLE = """
     vertical-align: middle;
   }
   .anking-images-wrap > img { max-width: 100%; }
-  .anking-images-actions {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    margin: 3px 0 1px;
-  }
-  .anking-images-action {
+  .anking-images-star {
     appearance: none;
     -webkit-appearance: none;
     border: 0;
@@ -62,19 +48,20 @@ STAR_STYLE = """
     color: #8b919a;
     cursor: pointer;
     font: 22px/1 sans-serif;
+    margin: 3px 0 1px;
     min-height: 26px;
     min-width: 26px;
     padding: 1px 3px 3px;
     text-align: center;
   }
-  .anking-images-action:hover,
-  .anking-images-action:focus-visible {
+  .anking-images-star:hover,
+  .anking-images-star:focus-visible {
     background: rgba(128, 128, 128, 0.16);
     color: #d69b00;
     outline: none;
   }
   .anking-images-star[data-saved="true"] { color: #f2b705; }
-  .anking-images-action[disabled] { cursor: wait; opacity: .65; }
+  .anking-images-star[disabled] { cursor: wait; opacity: .65; }
 </style>
 """
 
@@ -126,7 +113,6 @@ def augment_card_html(
         "fieldsByMedia": field_map,
         "savedMedia": saved_media,
         "messagePrefix": MESSAGE_PREFIX,
-        "exportMessagePrefix": EXPORT_MESSAGE_PREFIX,
         "minimumIconSizeMargin": MINIMUM_ICON_SIZE_MARGIN,
     }
     script = f"""
@@ -230,24 +216,12 @@ def augment_card_html(
       image.parentNode.insertBefore(wrapper, image);
       wrapper.appendChild(image);
 
-      const actions = document.createElement("span");
-      actions.className = "anking-images-actions";
-      wrapper.appendChild(actions);
-
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "anking-images-action anking-images-star";
+      button.className = "anking-images-star";
       button.dataset.mediaFilename = filename;
       setSaved(button, saved.has(filename));
-      actions.appendChild(button);
-
-      const exportButton = document.createElement("button");
-      exportButton.type = "button";
-      exportButton.className = "anking-images-action anking-images-export";
-      exportButton.textContent = "⇩";
-      exportButton.title = "Save image as PNG";
-      exportButton.setAttribute("aria-label", exportButton.title);
-      actions.appendChild(exportButton);
+      wrapper.appendChild(button);
 
       button.addEventListener("click", (event) => {{
         event.preventDefault();
@@ -290,23 +264,6 @@ def augment_card_html(
         }}
       }});
 
-      exportButton.addEventListener("click", (event) => {{
-        event.preventDefault();
-        event.stopPropagation();
-        if (exportButton.disabled) return;
-        exportButton.blur();
-        exportButton.disabled = true;
-        try {{
-          pycmd(config.exportMessagePrefix + JSON.stringify({{
-            imageSrc: source,
-            mediaFilename: filename
-          }}), () => {{
-            exportButton.disabled = false;
-          }});
-        }} catch (_) {{
-          exportButton.disabled = false;
-        }}
-      }});
     }});
   }}
 
@@ -318,57 +275,6 @@ def augment_card_html(
     return html + STAR_STYLE + script
 
 
-def _pixmap_for_source(image_src: str, media_filename: str) -> QPixmap:
-    if mw.col is not None and media_filename:
-        candidate = Path(mw.col.media.dir()) / media_filename
-        if candidate.is_file():
-            pixmap = QPixmap(str(candidate))
-            if not pixmap.isNull():
-                return pixmap
-
-    if image_src.lower().startswith("data:image/"):
-        try:
-            header, data = image_src.split(",", 1)
-            raw = (
-                base64.b64decode(data)
-                if ";base64" in header
-                else unquote_to_bytes(data)
-            )
-            pixmap = QPixmap()
-            if pixmap.loadFromData(raw):
-                return pixmap
-        except (ValueError, binascii.Error):
-            pass
-    return QPixmap()
-
-
-def _export_png(payload: dict[str, Any]) -> dict[str, Any]:
-    image_src = str(payload.get("imageSrc", ""))
-    media_filename = normalize_media_filename(
-        str(payload.get("mediaFilename", "")) or image_src
-    )
-    pixmap = _pixmap_for_source(image_src, media_filename)
-    if pixmap.isNull():
-        raise ValueError("The source image could not be loaded.")
-
-    stem = Path(media_filename or "anki-image").stem or "anki-image"
-    selected, _chosen_filter = QFileDialog.getSaveFileName(
-        mw,
-        "Save image as PNG",
-        f"{stem}.png",
-        "PNG images (*.png)",
-    )
-    if not selected:
-        return {"exported": False, "cancelled": True}
-    destination = Path(selected)
-    if destination.suffix.casefold() != ".png":
-        destination = destination.with_name(destination.name + ".png")
-    if not pixmap.save(str(destination), "PNG"):
-        raise OSError(f'Could not write "{destination}".')
-    tooltip(f'Saved PNG as "{destination.name}".', parent=mw)
-    return {"exported": True}
-
-
 def handle_js_message(
     handled: tuple[bool, Any],
     message: str,
@@ -377,18 +283,6 @@ def handle_js_message(
     gallery_refresh: Any = None,
     catalogue_changed: Any = None,
 ) -> tuple[bool, Any]:
-    if message.startswith(EXPORT_MESSAGE_PREFIX):
-        if mw.col is None:
-            return True, {"exported": False, "error": "No collection is open."}
-        try:
-            payload = json.loads(message[len(EXPORT_MESSAGE_PREFIX) :])
-            if not isinstance(payload, dict):
-                raise ValueError("The image export request is invalid.")
-            return True, _export_png(payload)
-        except Exception as error:
-            showWarning(f"The image could not be saved as PNG: {error}", parent=mw)
-            return True, {"exported": False, "error": str(error)}
-
     if not message.startswith(MESSAGE_PREFIX):
         return handled
     if mw.col is None:

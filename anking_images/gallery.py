@@ -13,6 +13,7 @@ from aqt import mw
 from aqt.qt import (
     QDialog,
     QEvent,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -27,7 +28,7 @@ from aqt.qt import (
     QWidget,
     Qt,
 )
-from aqt.utils import qconnect
+from aqt.utils import qconnect, showWarning, tooltip
 
 from .core import UNCATEGORIZED_SYSTEM, display_system_name
 from .storage import SavedImage, SavedImageStore
@@ -258,6 +259,16 @@ class ImageCard(QFrame):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
+
+        export_button = QPushButton("⇩")
+        export_button.setObjectName("ankingImagesExport")
+        export_button.setAccessibleName("Export image")
+        export_button.setToolTip("Save image as PNG")
+        export_button.setFixedSize(38, 34)
+        export_button.setEnabled(not self.pixmap.isNull())
+        qconnect(export_button.clicked, self._export)
+        actions.addWidget(export_button)
+
         favorite_button = QPushButton("★" if record.favorite else "☆")
         favorite_button.setObjectName("ankingImagesFavorite")
         favorite_button.setProperty("isFavorite", record.favorite)
@@ -299,6 +310,29 @@ class ImageCard(QFrame):
 
     def _delete(self) -> None:
         self._on_delete(self.record)
+
+    def _export(self) -> None:
+        if self.pixmap.isNull():
+            return
+        stem = Path(self.record.media_filename or "anki-image").stem or "anki-image"
+        selected, _chosen_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save image as PNG",
+            f"{stem}.png",
+            "PNG images (*.png)",
+        )
+        if not selected:
+            return
+        destination = Path(selected)
+        if destination.suffix.casefold() != ".png":
+            destination = destination.with_name(destination.name + ".png")
+        if not self.pixmap.save(str(destination), "PNG"):
+            showWarning(
+                f'The image could not be saved as PNG: Could not write "{destination}".',
+                parent=self,
+            )
+            return
+        tooltip(f'Saved PNG as "{destination.name}".', parent=self)
 
     def _favorite(self) -> None:
         self._on_favorite(self.record)

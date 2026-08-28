@@ -74,6 +74,7 @@ QToolButton#ankingImagesSection:hover {
     background: #0e2b46;
     border-color: rgba(238, 245, 255, 58);
 }
+QPushButton#ankingImagesExport,
 QPushButton#ankingImagesFavorite,
 QPushButton#ankingImagesDelete {
     background: #0e2b46;
@@ -83,11 +84,13 @@ QPushButton#ankingImagesDelete {
     font-size: 18px;
     padding: 1px;
 }
+QPushButton#ankingImagesExport:hover,
 QPushButton#ankingImagesFavorite:hover,
 QPushButton#ankingImagesDelete:hover {
     background: #153b5d;
     border-color: #6aa6ff;
 }
+QPushButton#ankingImagesExport:pressed,
 QPushButton#ankingImagesFavorite:pressed,
 QPushButton#ankingImagesDelete:pressed {
     background: #081a2b;

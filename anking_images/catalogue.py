@@ -104,12 +104,40 @@ class CatalogueSync:
     def write(self, collection: Any) -> int:
         """Write the current CSV records into the suspended sync card."""
 
-        note, _deck_id, created = self._ensure_note(collection)
-        if not created:
-            value = encode_catalogue(self.store.all())
-            if note[CATALOGUE_FIELD] != value:
-                self._write_note(collection, note, value)
-        return int(note.id)
+        previous_undo_step = self._previous_undo_step(collection)
+        try:
+            note, _deck_id, created = self._ensure_note(collection)
+            if not created:
+                value = encode_catalogue(self.store.all())
+                if note[CATALOGUE_FIELD] != value:
+                    self._write_note(collection, note, value)
+            return int(note.id)
+        finally:
+            self._merge_with_previous_undo(collection, previous_undo_step)
+
+    @staticmethod
+    def _previous_undo_step(collection: Any) -> int | None:
+        """Capture an existing review undo step before catalogue maintenance."""
+
+        try:
+            status = collection.undo_status()
+            step = int(status.last_step)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        return step if status.undo and step > 0 else None
+
+    @staticmethod
+    def _merge_with_previous_undo(collection: Any, step: int | None) -> None:
+        """Keep first-time sync-card setup from replacing the review undo."""
+
+        if step is None:
+            return
+        try:
+            collection.merge_undo_entries(step)
+        except AttributeError:
+            # Older Anki releases do not expose undo merging. Their note-update
+            # fallback still avoids adding a separate update operation.
+            pass
 
     def _ensure_notetype(self, collection: Any) -> dict[str, Any]:
         models = collection.models

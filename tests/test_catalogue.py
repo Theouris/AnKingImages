@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from anking_images.catalogue import (
     CATALOGUE_FIELD,
@@ -129,6 +130,14 @@ class FakeCollection:
         self.models = FakeModels(self)
         self.decks = FakeDecks()
         self.sched = FakeScheduler(self)
+        self.undo_status_value = SimpleNamespace(undo=None, last_step=0)
+        self.merged_undo_steps: list[int] = []
+
+    def undo_status(self) -> SimpleNamespace:
+        return self.undo_status_value
+
+    def merge_undo_entries(self, step: int) -> None:
+        self.merged_undo_steps.append(step)
 
     def new_note(self, notetype: dict) -> FakeNote:
         return FakeNote(self, notetype)
@@ -247,6 +256,18 @@ def test_local_change_rewrites_existing_sync_note_with_references_only(
         "brain.jpg",
         "heart.jpg",
     ]
+
+
+def test_first_write_preserves_the_existing_review_undo_step(tmp_path: Path) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    store.toggle(make_record())
+    collection = FakeCollection()
+    collection.undo_status_value = SimpleNamespace(undo="Review", last_step=42)
+
+    CatalogueSync(store).write(collection)
+
+    assert collection.merged_undo_steps == [42]
+    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == ["heart.jpg"]
 
 
 def test_old_anki_write_fallback_does_not_create_an_undo_entry(

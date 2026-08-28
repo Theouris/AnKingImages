@@ -1,8 +1,8 @@
 # AnKing Images
 
-An Anki desktop add-on that adds controls beneath substantive images shown in
+An Anki desktop add-on that adds a save star beneath substantive images shown in
 the reviewer, previewer, and card layout preview. An image must be at least 100
-px wider and taller than the bottom AnKing icon to receive controls. Saved image
+px wider and taller than the bottom AnKing icon to receive a star. Saved image
 metadata is kept in `user_files/saved_images.csv` and displayed in a
 system-grouped gallery. Only the selected image filenames/sources are stored in
 a suspended card in a standalone **AnKing Images** deck so the selection can
@@ -17,13 +17,12 @@ into Anki's `addons21` directory. Restart Anki after installing.
 
 1. Review or preview a card and click the empty **☆** beneath an image. The
    filled **★** means the image is saved. Click it again to remove the image.
-   Click **⇩** to choose a location and export the image as a PNG.
 2. Click the standalone **AnKing Images** deck to open the gallery, or open
    **AnKing Images → My Images** in Anki's menu bar. When AnkiHub is present,
    the add-on menu is placed immediately after it.
 3. Use the ☆ button on a gallery image to add it to the **Favorites** section at
-   the top. Use the regular 🗑️ button to remove it from the catalogue. Deleting a
-   gallery entry does not delete the original Anki media file.
+   the top. Use ⇩ to export it as a PNG, or 🗑️ to remove it from the catalogue.
+   Deleting a gallery entry does not delete the original Anki media file.
 4. Click a thumbnail for a resizable large view. Scroll or pinch on a mousepad
    to zoom; the native maximize/restore window control remains available.
 
