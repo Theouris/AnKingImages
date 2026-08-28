@@ -80,40 +80,52 @@ def decode_catalogue(value: str) -> list[str]:
 
 
 class CatalogueSync:
-    """Maintain the standalone deck, suspended card, and CSV mirror."""
+    """Maintain the standalone deck and a pooled card/CSV catalogue."""
 
     def __init__(self, store: SavedImageStore) -> None:
         self.store = store
 
     def setup_and_pull(self, collection: Any) -> int:
-        """Ensure the sync card exists, then make its catalogue the local CSV."""
+        """Ensure the sync card exists, then pool its names with the local CSV."""
 
         note, _deck_id, created = self._ensure_note(collection)
         if not created:
-            try:
-                references = decode_catalogue(note[CATALOGUE_FIELD])
-            except ValueError:
-                self._write_note(collection, note, encode_catalogue(self.store.all()))
-            else:
-                self.store.replace_catalogue_references(references)
-                compact_value = encode_catalogue(self.store.all())
-                if note[CATALOGUE_FIELD] != compact_value:
-                    self._write_note(collection, note, compact_value)
+            self._pool_catalogues(collection, note)
         return int(note.id)
 
     def write(self, collection: Any) -> int:
-        """Explicitly write the current CSV records into the suspended sync card."""
+        """Pool CSV/card image names and persist the result to both stores."""
 
         previous_undo_step = self._previous_undo_step(collection)
         try:
             note, _deck_id, created = self._ensure_note(collection)
             if not created:
-                value = encode_catalogue(self.store.all())
-                if note[CATALOGUE_FIELD] != value:
-                    self._write_note(collection, note, value)
+                self._pool_catalogues(collection, note)
             return int(note.id)
         finally:
             self._merge_with_previous_undo(collection, previous_undo_step)
+
+    def _pool_catalogues(self, collection: Any, note: Any) -> None:
+        """Union image names from the card and CSV, retaining local metadata."""
+
+        local_references = [
+            reference
+            for record in self.store.all()
+            if (reference := catalogue_reference(record))
+        ]
+        try:
+            card_references = decode_catalogue(note[CATALOGUE_FIELD])
+        except ValueError:
+            # Keep valid local data when upgrading or repairing a malformed card.
+            card_references = []
+
+        pooled_references = list(
+            dict.fromkeys([*local_references, *card_references])
+        )
+        self.store.replace_catalogue_references(pooled_references)
+        compact_value = encode_catalogue(self.store.all())
+        if note[CATALOGUE_FIELD] != compact_value:
+            self._write_note(collection, note, compact_value)
 
     @staticmethod
     def _previous_undo_step(collection: Any) -> int | None:

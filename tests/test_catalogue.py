@@ -206,11 +206,11 @@ def test_setup_creates_standalone_suspended_sync_card(tmp_path: Path) -> None:
     assert [(card.did, card.queue) for card in collection.cards] == [(55, -1)]
 
 
-def test_synced_card_replaces_csv_and_propagates_deletions(tmp_path: Path) -> None:
+def test_synced_card_and_csv_are_pooled_and_saved_to_both(tmp_path: Path) -> None:
     store = SavedImageStore(tmp_path / "saved_images.csv")
     first = make_record(10)
     second = make_record(11, "brain.jpg")
-    store.replace_all([first, second])
+    store.replace_all([first])
     collection = FakeCollection()
     sync = CatalogueSync(store)
     sync.setup_and_pull(collection)
@@ -220,7 +220,35 @@ def test_synced_card_replaces_csv_and_propagates_deletions(tmp_path: Path) -> No
     )
     sync.setup_and_pull(collection)
 
-    assert store.all() == [second]
+    records = {record.media_filename: record for record in store.all()}
+    assert records["heart.jpg"] == first
+    assert records["brain.jpg"].note_id == 0
+    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
+        "brain.jpg",
+        "heart.jpg",
+    ]
+
+
+def test_explicit_sync_pools_card_and_csv_names(tmp_path: Path) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    local = make_record(10)
+    remote = make_record(11, "brain.jpg")
+    store.replace_all([local])
+    collection = FakeCollection()
+    sync = CatalogueSync(store)
+    sync.setup_and_pull(collection)
+    collection.notes[100][CATALOGUE_FIELD] = encode_catalogue([remote])
+
+    sync.write(collection)
+
+    assert {record.media_filename for record in store.all()} == {
+        "brain.jpg",
+        "heart.jpg",
+    }
+    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
+        "brain.jpg",
+        "heart.jpg",
+    ]
 
 
 def test_old_metadata_card_is_rewritten_in_compact_format(tmp_path: Path) -> None:

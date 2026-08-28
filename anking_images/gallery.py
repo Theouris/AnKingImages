@@ -431,11 +431,11 @@ class GalleryDialog(QDialog):
         heading.setObjectName("ankingImagesHeading")
         heading_row.addWidget(heading)
         heading_row.addStretch(1)
-        self.sync_button = QPushButton("Sync")
+        self.sync_button = QPushButton("⟳  Sync")
         self.sync_button.setObjectName("ankingImagesSync")
         self.sync_button.setAccessibleName("Sync image catalogue to Anki")
         self.sync_button.setToolTip(
-            "Copy the image IDs in the local CSV to the suspended Anki catalogue card"
+            "Pool image IDs from the local CSV and suspended Anki catalogue card"
         )
         self.sync_button.setEnabled(callable(self._on_sync_requested))
         qconnect(self.sync_button.clicked, self._sync_catalogue)
@@ -443,8 +443,8 @@ class GalleryDialog(QDialog):
         root.addLayout(heading_row)
         description = QLabel(
             "Saved images are grouped by #AK_Step1_v12::^Systems tags. "
-            "Open a system to view its images. Click Sync to copy the local "
-            "selection to Anki."
+            "Open a system to view its images. Click Sync to combine the local "
+            "and Anki catalogue selections."
         )
         description.setObjectName("ankingImagesMuted")
         description.setWordWrap(True)
@@ -573,4 +573,4 @@ class GalleryDialog(QDialog):
         self.error_label.hide()
         count = len(self.store.all())
         noun = "image ID" if count == 1 else "image IDs"
-        tooltip(f"Synced {count} {noun} to Anki.", parent=self)
+        tooltip(f"Pooled {count} {noun} across the CSV and Anki.", parent=self)

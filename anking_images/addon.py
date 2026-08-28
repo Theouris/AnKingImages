@@ -9,7 +9,7 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QMenu, QTimer
 from aqt.utils import qconnect
 
-from .catalogue import CatalogueSync, DECK_NAME
+from .catalogue import CatalogueSync
 from .gallery import GalleryDialog
 from .reviewer import augment_card_html, handle_js_message
 from .storage import SavedImageStore
@@ -34,10 +34,11 @@ def _refresh_visible_gallery() -> None:
 
 def _sync_catalogue_card() -> str:
     global _catalogue_error
-    if mw.col is None:
+    collection = mw.col
+    if collection is None:
         return "No Anki collection is open, so the sync card was not updated."
     try:
-        CATALOGUE.write(mw.col)
+        CATALOGUE.write(collection)
     except Exception as error:
         _catalogue_error = str(error)
         return f"The image catalogue could not be synced to Anki: {error}"
@@ -47,17 +48,31 @@ def _sync_catalogue_card() -> str:
 
 def _pull_catalogue_card() -> None:
     global _catalogue_error
-    if mw.col is None:
+    collection = mw.col
+    if collection is None:
         return
     try:
-        CATALOGUE.setup_and_pull(mw.col)
+        CATALOGUE.setup_and_pull(collection)
     except Exception as error:
         _catalogue_error = str(error)
     else:
         _catalogue_error = ""
     _refresh_visible_gallery()
     if getattr(mw, "state", None) == "deckBrowser":
-        QTimer.singleShot(0, mw.deckBrowser.refresh)
+        QTimer.singleShot(0, _refresh_deck_browser_if_open)
+
+
+def _refresh_deck_browser_if_open() -> None:
+    """Refresh only while Anki still has a live collection.
+
+    A sync completion can queue this callback just before profile shutdown.
+    Calling Anki's deck-browser refresh after ``mw.col`` becomes ``None`` makes
+    Anki's own refresh path fail while reading the collection configuration.
+    """
+
+    if mw.col is None or getattr(mw, "state", None) != "deckBrowser":
+        return
+    mw.deckBrowser.refresh()
 
 
 def _show_gallery() -> None:
@@ -117,18 +132,6 @@ def _on_js_message(
     )
 
 
-def _on_state_did_change(new_state: str, _old_state: str) -> None:
-    if new_state != "overview" or mw.col is None:
-        return
-    try:
-        selected_id = mw.col.decks.selected()
-        selected_name = mw.col.decks.name_if_exists(selected_id)
-    except Exception:
-        return
-    if selected_name == DECK_NAME:
-        QTimer.singleShot(0, _show_gallery)
-
-
 def _on_media_sync_state_changed(running: bool) -> None:
     if not running:
         _refresh_visible_gallery()
@@ -152,6 +155,5 @@ def register() -> None:
     gui_hooks.profile_will_close.append(_on_profile_will_close)
     gui_hooks.sync_did_finish.append(_pull_catalogue_card)
     gui_hooks.media_sync_did_start_or_stop.append(_on_media_sync_state_changed)
-    gui_hooks.state_did_change.append(_on_state_did_change)
     gui_hooks.card_will_show.append(_on_card_will_show)
     gui_hooks.webview_did_receive_js_message.append(_on_js_message)
