@@ -1,25 +1,22 @@
 """Anki-note-backed catalogue synchronization.
 
-The CSV remains the gallery's fast local data source. A single suspended Anki
-card carries the same records so normal collection sync can move the catalogue
-between devices.
+The CSV remains the gallery's rich local data source. A single suspended Anki
+card carries only the selected image filenames/sources so normal collection
+sync can move the selection between devices.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from .storage import CSV_COLUMNS, SavedImage, SavedImageStore
+from .storage import SavedImage, SavedImageStore, catalogue_reference
 
 
 DECK_NAME = "AnKing Images"
 NOTETYPE_NAME = "AnKing Images Sync"
 CATALOGUE_FIELD = "AnKingImagesCatalogue"
 SYNC_GUID = "AKImgsCat1"
-SCHEMA_VERSION = 1
-
 _CARD_FRONT = (
     f"{{{{#{CATALOGUE_FIELD}}}}}"
     '<div style="font-family: sans-serif; text-align: center;">'
@@ -34,22 +31,23 @@ _CARD_CSS = ".card { background: #081a2b; color: #eef5ff; }"
 def encode_catalogue(
     records: Iterable[SavedImage], *, updated_at_utc: str | None = None
 ) -> str:
-    """Serialize records for the hidden sync note field."""
+    """Serialize only image filenames/sources for the hidden sync note field.
 
-    updated = updated_at_utc or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    payload = {
-        "schema_version": SCHEMA_VERSION,
-        "updated_at_utc": updated,
-        "records": [
-            record.to_row()
-            for record in sorted(records, key=lambda item: item.record_id)
-        ],
-    }
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    ``updated_at_utc`` remains accepted so callers of the first catalogue format
+    do not break, but timestamps and local display metadata are intentionally not
+    stored on the Anki note.
+    """
+
+    del updated_at_utc
+    references = sorted(
+        {reference for record in records if (reference := catalogue_reference(record))},
+        key=str.casefold,
+    )
+    return json.dumps(references, ensure_ascii=False, separators=(",", ":"))
 
 
-def decode_catalogue(value: str) -> list[SavedImage]:
-    """Deserialize and validate a sync note catalogue."""
+def decode_catalogue(value: str) -> list[str]:
+    """Deserialize a compact catalogue, including the original v1 format."""
 
     try:
         payload = json.loads(str(value or ""))
@@ -57,25 +55,28 @@ def decode_catalogue(value: str) -> list[SavedImage]:
         raise ValueError(
             "The AnKing Images sync catalogue is not valid JSON."
         ) from error
-    if not isinstance(payload, dict) or payload.get("schema_version") != SCHEMA_VERSION:
+    if isinstance(payload, list):
+        raw_references = payload
+    elif isinstance(payload, dict) and payload.get("schema_version") == 1:
+        # Seamlessly migrate cards written by the metadata-heavy first format.
+        rows = payload.get("records")
+        if not isinstance(rows, list):
+            raise ValueError("The AnKing Images sync catalogue has no records list.")
+        raw_references = []
+        for index, row in enumerate(rows, start=1):
+            if not isinstance(row, dict):
+                raise ValueError(f"Catalogue record {index} is not an object.")
+            raw_references.append(row.get("media_filename") or row.get("image_src"))
+    else:
         raise ValueError("The AnKing Images sync catalogue has an unsupported format.")
-    rows = payload.get("records")
-    if not isinstance(rows, list):
-        raise ValueError("The AnKing Images sync catalogue has no records list.")
 
-    records: dict[str, SavedImage] = {}
-    for index, raw_row in enumerate(rows, start=1):
-        if not isinstance(raw_row, dict):
-            raise ValueError(f"Catalogue record {index} is not an object.")
-        row = {
-            column: "" if raw_row.get(column) is None else str(raw_row.get(column, ""))
-            for column in CSV_COLUMNS
-        }
-        record = SavedImage.from_row(row)
-        if not record.note_id or not (record.media_filename or record.image_src):
+    references: dict[str, None] = {}
+    for index, raw_reference in enumerate(raw_references, start=1):
+        reference = str(raw_reference or "").strip()
+        if not reference:
             raise ValueError(f"Catalogue record {index} does not identify an image.")
-        records[record.record_id] = record
-    return list(records.values())
+        references[reference] = None
+    return list(references)
 
 
 class CatalogueSync:
@@ -90,11 +91,14 @@ class CatalogueSync:
         note, _deck_id, created = self._ensure_note(collection)
         if not created:
             try:
-                records = decode_catalogue(note[CATALOGUE_FIELD])
+                references = decode_catalogue(note[CATALOGUE_FIELD])
             except ValueError:
                 self._write_note(collection, note, encode_catalogue(self.store.all()))
             else:
-                self.store.replace_all(records)
+                self.store.replace_catalogue_references(references)
+                compact_value = encode_catalogue(self.store.all())
+                if note[CATALOGUE_FIELD] != compact_value:
+                    self._write_note(collection, note, compact_value)
         return int(note.id)
 
     def write(self, collection: Any) -> int:
@@ -102,7 +106,9 @@ class CatalogueSync:
 
         note, _deck_id, created = self._ensure_note(collection)
         if not created:
-            self._write_note(collection, note, encode_catalogue(self.store.all()))
+            value = encode_catalogue(self.store.all())
+            if note[CATALOGUE_FIELD] != value:
+                self._write_note(collection, note, value)
         return int(note.id)
 
     def _ensure_notetype(self, collection: Any) -> dict[str, Any]:
@@ -198,6 +204,6 @@ class CatalogueSync:
         try:
             collection.update_note(note, skip_undo_entry=True)
         except TypeError:
-            # Anki versions before skip_undo_entry was added still support the
-            # same update operation without the optional argument.
-            collection.update_note(note)
+            # A normal update_note() call creates an undo entry on older Anki
+            # versions and can displace the user's latest review action.
+            note.flush()

@@ -180,6 +180,12 @@ class SavedImage:
         )
 
 
+def catalogue_reference(record: SavedImage) -> str:
+    """Return the sole value persisted on the Anki catalogue card."""
+
+    return record.media_filename or record.image_src
+
+
 class SavedImageStore:
     """Thread-safe CSV store with atomic replacement on every change."""
 
@@ -205,9 +211,7 @@ class SavedImageStore:
                         ):
                             try:
                                 record = SavedImage.from_row(row)
-                                if record.note_id and (
-                                    record.media_filename or record.image_src
-                                ):
+                                if catalogue_reference(record):
                                     records[record.record_id] = record
                             except Exception as error:
                                 errors.append(f"row {line_number}: {error}")
@@ -230,24 +234,36 @@ class SavedImageStore:
             )
 
     def is_saved(self, note_id: int, media_filename: str, image_src: str = "") -> bool:
-        key = record_id_for(note_id, media_filename, image_src)
+        del note_id
+        reference = normalize_media_filename(media_filename or image_src) or image_src
         with self._lock:
-            return key in self._records
+            return any(
+                catalogue_reference(record) == reference
+                for record in self._records.values()
+            )
 
     def saved_media_for_note(self, note_id: int) -> set[str]:
+        del note_id
         with self._lock:
             return {
                 record.media_filename
                 for record in self._records.values()
-                if record.note_id == int(note_id) and record.media_filename
+                if record.media_filename
             }
 
     def toggle(self, record: SavedImage) -> bool:
         """Toggle a record and return True when it is saved afterward."""
 
         with self._lock:
-            if record.record_id in self._records:
-                del self._records[record.record_id]
+            reference = catalogue_reference(record)
+            matching_ids = [
+                record_id
+                for record_id, existing in self._records.items()
+                if catalogue_reference(existing) == reference
+            ]
+            if matching_ids:
+                for record_id in matching_ids:
+                    del self._records[record_id]
                 saved = False
             else:
                 systems = record.systems or (UNCATEGORIZED_SYSTEM,)
@@ -290,8 +306,49 @@ class SavedImageStore:
                     systems=record.systems or (UNCATEGORIZED_SYSTEM,),
                 )
                 for record in records
-                if record.note_id and (record.media_filename or record.image_src)
+                if catalogue_reference(record)
             }
+            self.load_errors = []
+            self._write_locked()
+
+    def replace_catalogue_references(self, references: Iterable[str]) -> None:
+        """Mirror compact sync references while retaining local display metadata."""
+
+        with self._lock:
+            desired = list(
+                dict.fromkeys(str(value).strip() for value in references if value)
+            )
+            local_by_reference: dict[str, SavedImage] = {}
+            for record in self._records.values():
+                reference = catalogue_reference(record)
+                if reference and reference not in local_by_reference:
+                    local_by_reference[reference] = record
+
+            replacement: dict[str, SavedImage] = {}
+            for reference in desired:
+                record = local_by_reference.get(reference)
+                if record is None:
+                    filename = normalize_media_filename(reference)
+                    record = SavedImage.create(
+                        note_id=0,
+                        card_id=0,
+                        deck_name="",
+                        note_type="",
+                        field_names=[],
+                        image_src=reference,
+                        media_filename=filename,
+                        alt_text="",
+                        image_title="",
+                        rendered_width=0,
+                        rendered_height=0,
+                        natural_width=0,
+                        natural_height=0,
+                        systems=[UNCATEGORIZED_SYSTEM],
+                        tags=[],
+                    )
+                replacement[record.record_id] = record
+
+            self._records = replacement
             self.load_errors = []
             self._write_locked()
 

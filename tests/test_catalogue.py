@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from anking_images.catalogue import (
@@ -13,15 +14,15 @@ from anking_images.catalogue import (
 from anking_images.storage import SavedImage, SavedImageStore
 
 
-def make_record(note_id: int = 10) -> SavedImage:
+def make_record(note_id: int = 10, filename: str = "heart.jpg") -> SavedImage:
     return SavedImage.create(
         note_id=note_id,
         card_id=20,
         deck_name="AnKing::Step 1",
         note_type="AnKingOverhaul",
         field_names=["Extra"],
-        image_src="heart.jpg",
-        media_filename="heart.jpg",
+        image_src=filename,
+        media_filename=filename,
         alt_text="Heart",
         image_title="Anatomy",
         rendered_width=500,
@@ -48,6 +49,7 @@ class FakeNote:
         self.mid = notetype["id"]
         self.guid = "random"
         self.mod = 0
+        self.flushed = False
         self.fields = {field["name"]: "" for field in notetype["flds"]}
 
     def __getitem__(self, name: str) -> str:
@@ -58,6 +60,9 @@ class FakeNote:
 
     def cards(self) -> list[FakeCard]:
         return [card for card in self.collection.cards if card.nid == self.id]
+
+    def flush(self) -> None:
+        self.flushed = True
 
 
 class FakeModels:
@@ -158,15 +163,24 @@ class FakeCollection:
                 card.did = deck_id
 
 
-def test_catalogue_json_round_trip_includes_favorites() -> None:
+def test_catalogue_contains_only_deduplicated_image_references() -> None:
     record = make_record()
     favorite = SavedImage.from_row({**record.to_row(), "favorite": "1"})
 
-    decoded = decode_catalogue(
-        encode_catalogue([favorite], updated_at_utc="2026-08-28T00:00:00+00:00")
-    )
+    encoded = encode_catalogue([record, favorite])
 
-    assert decoded == [favorite]
+    assert encoded == '["heart.jpg"]'
+    assert decode_catalogue(encoded) == ["heart.jpg"]
+
+
+def test_old_metadata_catalogue_is_read_as_compact_references() -> None:
+    old_payload = {
+        "schema_version": 1,
+        "updated_at_utc": "2026-08-28T00:00:00+00:00",
+        "records": [make_record().to_row()],
+    }
+
+    assert decode_catalogue(json.dumps(old_payload)) == ["heart.jpg"]
 
 
 def test_setup_creates_standalone_suspended_sync_card(tmp_path: Path) -> None:
@@ -179,14 +193,14 @@ def test_setup_creates_standalone_suspended_sync_card(tmp_path: Path) -> None:
     note = collection.notes[100]
     assert collection.decks.created_names == [DECK_NAME]
     assert note.guid == SYNC_GUID
-    assert decode_catalogue(note[CATALOGUE_FIELD]) == store.all()
+    assert decode_catalogue(note[CATALOGUE_FIELD]) == ["heart.jpg"]
     assert [(card.did, card.queue) for card in collection.cards] == [(55, -1)]
 
 
 def test_synced_card_replaces_csv_and_propagates_deletions(tmp_path: Path) -> None:
     store = SavedImageStore(tmp_path / "saved_images.csv")
     first = make_record(10)
-    second = make_record(11)
+    second = make_record(11, "brain.jpg")
     store.replace_all([first, second])
     collection = FakeCollection()
     sync = CatalogueSync(store)
@@ -200,7 +214,25 @@ def test_synced_card_replaces_csv_and_propagates_deletions(tmp_path: Path) -> No
     assert store.all() == [second]
 
 
-def test_local_change_rewrites_existing_sync_note(tmp_path: Path) -> None:
+def test_old_metadata_card_is_rewritten_in_compact_format(tmp_path: Path) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    record = make_record()
+    collection = FakeCollection()
+    sync = CatalogueSync(store)
+    sync.setup_and_pull(collection)
+    note = collection.notes[100]
+    note[CATALOGUE_FIELD] = json.dumps(
+        {"schema_version": 1, "records": [record.to_row()]}
+    )
+
+    sync.setup_and_pull(collection)
+
+    assert note[CATALOGUE_FIELD] == '["heart.jpg"]'
+
+
+def test_local_change_rewrites_existing_sync_note_with_references_only(
+    tmp_path: Path,
+) -> None:
     store = SavedImageStore(tmp_path / "saved_images.csv")
     record = make_record()
     store.toggle(record)
@@ -208,7 +240,29 @@ def test_local_change_rewrites_existing_sync_note(tmp_path: Path) -> None:
     sync = CatalogueSync(store)
     sync.setup_and_pull(collection)
 
-    store.set_favorite(record.record_id, True)
+    store.toggle(make_record(11, "brain.jpg"))
     sync.write(collection)
 
-    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD])[0].favorite is True
+    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
+        "brain.jpg",
+        "heart.jpg",
+    ]
+
+
+def test_old_anki_write_fallback_does_not_create_an_undo_entry(
+    tmp_path: Path,
+) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    collection = FakeCollection()
+    sync = CatalogueSync(store)
+    sync.setup_and_pull(collection)
+    note = collection.notes[100]
+
+    def old_update_note(updated_note: FakeNote) -> None:
+        updated_note.mod += 1
+
+    collection.update_note = old_update_note  # type: ignore[method-assign]
+    store.toggle(make_record())
+    sync.write(collection)
+
+    assert note.flushed is True

@@ -1,11 +1,12 @@
 # AnKing Images
 
-An Anki desktop add-on that adds a save star beneath substantive images shown in
+An Anki desktop add-on that adds controls beneath substantive images shown in
 the reviewer, previewer, and card layout preview. An image must be at least 100
-px wider and taller than the bottom AnKing icon to receive a star. Saved image
+px wider and taller than the bottom AnKing icon to receive controls. Saved image
 metadata is kept in `user_files/saved_images.csv` and displayed in a
-system-grouped gallery. The same catalogue is stored in a suspended card in a
-standalone **AnKing Images** deck so it can travel through normal Anki sync.
+system-grouped gallery. Only the selected image filenames/sources are stored in
+a suspended card in a standalone **AnKing Images** deck so the selection can
+travel through normal Anki sync.
 
 ## Install
 
@@ -16,6 +17,7 @@ into Anki's `addons21` directory. Restart Anki after installing.
 
 1. Review or preview a card and click the empty **☆** beneath an image. The
    filled **★** means the image is saved. Click it again to remove the image.
+   Click **⇩** to choose a location and export the image as a PNG.
 2. Click the standalone **AnKing Images** deck to open the gallery, or open
    **AnKing Images → My Images** in Anki's menu bar. When AnkiHub is present,
    the add-on menu is placed immediately after it.
@@ -30,9 +32,10 @@ System sections are generated from the first child of tags matching
 **Uncategorized**. New systems appear automatically as soon as their first
 image is saved.
 
-The CSV records the image ID, favorite state, save time, note/card IDs, deck,
-note type, source field, media filename, image text/dimensions, extracted
-systems, and the note's tags. Every save, delete, or favorite change rewrites
-the add-on's single suspended catalogue card. After collection sync, that card
-rewrites the local CSV, including removals made on another device. Anki's
+The local CSV records the image ID, favorite state, save time, note/card IDs,
+deck, note type, source field, media filename, image text/dimensions, extracted
+systems, and the note's tags. Every save or delete rewrites the add-on's single
+suspended catalogue card as a compact list of filenames/sources. After
+collection sync, that list updates the local selection, including removals made
+on another device. Favorites and rich display metadata remain local. Anki's
 special `user_files` directory preserves the local mirror across add-on updates.

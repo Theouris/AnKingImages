@@ -505,7 +505,6 @@ class GalleryDialog(QDialog):
             self.error_label.show()
             return
         self.refresh()
-        self._catalogue_changed()
 
     def _catalogue_changed(self) -> None:
         if not callable(self._on_catalogue_changed):

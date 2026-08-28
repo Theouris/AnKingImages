@@ -100,6 +100,31 @@ def test_replace_all_mirrors_remote_catalogue(tmp_path: Path) -> None:
     assert SavedImageStore(path).all() == [replacement]
 
 
+def test_compact_catalogue_references_preserve_local_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "saved_images.csv"
+    store = SavedImageStore(path)
+    existing = make_record(note_id=10)
+    store.toggle(existing)
+
+    store.replace_catalogue_references([existing.media_filename, "remote.png"])
+
+    records = {record.media_filename: record for record in store.all()}
+    assert records[existing.media_filename] == existing
+    assert records["remote.png"].note_id == 0
+    assert records["remote.png"].systems == ("Uncategorized",)
+
+
+def test_saved_selection_is_image_based_across_notes(tmp_path: Path) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    first = make_record(note_id=10)
+    same_image_on_another_note = make_record(note_id=11)
+
+    assert store.toggle(first) is True
+    assert store.is_saved(11, same_image_on_another_note.media_filename)
+    assert store.toggle(same_image_on_another_note) is False
+    assert store.all() == []
+
+
 def test_malformed_row_does_not_hide_valid_rows(tmp_path: Path) -> None:
     path = tmp_path / "saved_images.csv"
     store = SavedImageStore(path)
