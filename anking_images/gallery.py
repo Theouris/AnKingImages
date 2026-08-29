@@ -452,18 +452,11 @@ class GalleryDialog(QDialog):
         )
         self.sync_button.setEnabled(callable(self._on_sync_requested))
         qconnect(self.sync_button.clicked, self._sync_catalogue)
-        header_balance = QWidget()
-        header_balance.setFixedWidth(self.sync_button.sizeHint().width())
-        heading_row.addWidget(header_balance)
-        heading_row.addStretch(1)
-        heading = QLabel("AnKing Images")
-        heading.setObjectName("ankingImagesHeading")
-        heading_row.addWidget(heading)
         heading_row.addStretch(1)
         heading_row.addWidget(self.sync_button)
         root.addLayout(heading_row)
         description = QLabel(
-            "Saved images start in a subheading based on their "
+            "AnKing Images — Saved images start in a subheading based on their "
             "#AK_Step1_v12::^Systems tag. Use ↪ on any image to move it to an "
             "existing subheading or type a new one. Click Sync to combine the "
             "local and Anki catalogue selections."
