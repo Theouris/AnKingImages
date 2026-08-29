@@ -1,8 +1,8 @@
 """Anki-note-backed catalogue synchronization.
 
 The CSV remains the gallery's rich local data source. A single suspended Anki
-card carries only the selected image filenames/sources so normal collection
-sync can move the selection between devices.
+card carries the selected image IDs and subheadings so normal collection sync
+can move the selection and gallery organization between devices.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any, Iterable
 from .storage import SavedImage, SavedImageStore, catalogue_reference
 
 
-DECK_NAME = "AnKing Images"
+DECK_NAME = "~AnKing Images"
 NOTETYPE_NAME = "AnKing Images Sync"
 CATALOGUE_FIELD = "AnKingImagesCatalogue"
 SYNC_GUID = "AKImgsCat1"
@@ -31,23 +31,28 @@ _CARD_CSS = ".card { background: #081a2b; color: #eef5ff; }"
 def encode_catalogue(
     records: Iterable[SavedImage], *, updated_at_utc: str | None = None
 ) -> str:
-    """Serialize only image filenames/sources for the hidden sync note field.
+    """Serialize image IDs and subheadings for the hidden sync note field.
 
     ``updated_at_utc`` remains accepted so callers of the first catalogue format
-    do not break, but timestamps and local display metadata are intentionally not
-    stored on the Anki note.
+    do not break, but timestamps and other local display metadata are
+    intentionally not stored on the Anki note.
     """
 
     del updated_at_utc
-    references = sorted(
-        {reference for record in records if (reference := catalogue_reference(record))},
-        key=str.casefold,
-    )
-    return json.dumps(references, ensure_ascii=False, separators=(",", ":"))
+    entries: dict[str, str] = {}
+    for record in records:
+        reference = catalogue_reference(record)
+        if reference and reference not in entries:
+            entries[reference] = str(record.subcategory or "").strip()
+    payload = [
+        {"image_id": reference, "subcategory": entries[reference]}
+        for reference in sorted(entries, key=str.casefold)
+    ]
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def decode_catalogue(value: str) -> list[str]:
-    """Deserialize a compact catalogue, including the original v1 format."""
+def decode_catalogue(value: str) -> list[tuple[str, str]]:
+    """Deserialize image/subheading pairs, including both older formats."""
 
     try:
         payload = json.loads(str(value or ""))
@@ -66,17 +71,31 @@ def decode_catalogue(value: str) -> list[str]:
         for index, row in enumerate(rows, start=1):
             if not isinstance(row, dict):
                 raise ValueError(f"Catalogue record {index} is not an object.")
-            raw_references.append(row.get("media_filename") or row.get("image_src"))
+            raw_references.append(row)
     else:
         raise ValueError("The AnKing Images sync catalogue has an unsupported format.")
 
-    references: dict[str, None] = {}
-    for index, raw_reference in enumerate(raw_references, start=1):
+    entries: dict[str, str] = {}
+    for index, raw_entry in enumerate(raw_references, start=1):
+        raw_subcategory: object = ""
+        if isinstance(raw_entry, dict):
+            raw_reference = (
+                raw_entry.get("image_id")
+                or raw_entry.get("media_filename")
+                or raw_entry.get("image_src")
+            )
+            raw_subcategory = raw_entry.get("subcategory", "")
+        elif isinstance(raw_entry, (list, tuple)) and len(raw_entry) == 2:
+            raw_reference, raw_subcategory = raw_entry
+        else:
+            # The original compact format was a plain list of image IDs.
+            raw_reference = raw_entry
         reference = str(raw_reference or "").strip()
         if not reference:
             raise ValueError(f"Catalogue record {index} does not identify an image.")
-        references[reference] = None
-    return list(references)
+        if reference not in entries:
+            entries[reference] = str(raw_subcategory or "").strip()
+    return list(entries.items())
 
 
 class CatalogueSync:
@@ -106,23 +125,27 @@ class CatalogueSync:
             self._merge_with_previous_undo(collection, previous_undo_step)
 
     def _pool_catalogues(self, collection: Any, note: Any) -> None:
-        """Union image names from the card and CSV, retaining local metadata."""
+        """Union entries while giving local CSV subheadings precedence."""
 
-        local_references = [
-            reference
+        local_entries = [
+            (reference, record.subcategory)
             for record in self.store.all()
             if (reference := catalogue_reference(record))
         ]
         try:
-            card_references = decode_catalogue(note[CATALOGUE_FIELD])
+            card_entries = decode_catalogue(note[CATALOGUE_FIELD])
         except ValueError:
             # Keep valid local data when upgrading or repairing a malformed card.
-            card_references = []
+            card_entries = []
 
-        pooled_references = list(
-            dict.fromkeys([*local_references, *card_references])
-        )
-        self.store.replace_catalogue_references(pooled_references)
+        # setdefault is deliberate: a CSV value, including an explicitly blank
+        # Uncategorized value, wins over the catalogue card for the same image.
+        pooled_entries: dict[str, str] = {}
+        for reference, subcategory in local_entries:
+            pooled_entries.setdefault(reference, subcategory)
+        for reference, subcategory in card_entries:
+            pooled_entries.setdefault(reference, subcategory)
+        self.store.replace_catalogue_entries(pooled_entries.items())
         compact_value = encode_catalogue(self.store.all())
         if note[CATALOGUE_FIELD] != compact_value:
             self._write_note(collection, note, compact_value)
@@ -193,9 +216,6 @@ class CatalogueSync:
         return notetype
 
     def _ensure_note(self, collection: Any) -> tuple[Any, int, bool]:
-        deck_id = collection.decks.id(DECK_NAME)
-        if deck_id is None:
-            raise RuntimeError("Anki could not create the AnKing Images deck.")
         notetype = self._ensure_notetype(collection)
         notes = [
             collection.get_note(note_id)
@@ -204,6 +224,9 @@ class CatalogueSync:
 
         created = not notes
         if created:
+            deck_id = collection.decks.id(DECK_NAME)
+            if deck_id is None:
+                raise RuntimeError("Anki could not create the AnKing Images deck.")
             note = collection.new_note(notetype)
             note.guid = SYNC_GUID
             note[CATALOGUE_FIELD] = encode_catalogue(self.store.all())
@@ -223,7 +246,11 @@ class CatalogueSync:
                 self._write_note(collection, note, note[CATALOGUE_FIELD])
 
         cards = list(note.cards())
+        should_place_in_default_deck = not cards
         if not cards:
+            deck_id = collection.decks.id(DECK_NAME)
+            if deck_id is None:
+                raise RuntimeError("Anki could not create the AnKing Images deck.")
             collection.after_note_updates(
                 [note.id], mark_modified=True, generate_cards=True
             )
@@ -232,8 +259,15 @@ class CatalogueSync:
             raise RuntimeError("Anki could not create the catalogue sync card.")
 
         card_ids = [card.id for card in cards]
-        if any(int(card.did) != int(deck_id) for card in cards):
+        if should_place_in_default_deck and any(
+            int(card.did) != int(deck_id) for card in cards
+        ):
             collection.set_deck(card_ids, deck_id)
+        elif not should_place_in_default_deck:
+            # Respect a user's choice to move the existing sync card. Most
+            # importantly, do not call decks.id(), which would recreate a deck
+            # the user intentionally moved or renamed.
+            deck_id = int(cards[0].did)
         if any(int(card.queue) != -1 for card in cards):
             collection.sched.suspend_cards(card_ids)
         return note, int(deck_id), created

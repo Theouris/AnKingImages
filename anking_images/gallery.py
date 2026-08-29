@@ -17,6 +17,7 @@ from aqt.qt import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPixmap,
@@ -226,12 +227,14 @@ class ImageCard(QFrame):
         self,
         record: SavedImage,
         on_favorite: Callable[[SavedImage], None],
+        on_move: Callable[[SavedImage], None],
         on_delete: Callable[[SavedImage], None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.record = record
         self._on_favorite = on_favorite
+        self._on_move = on_move
         self._on_delete = on_delete
         self.pixmap = _load_pixmap(record)
         self._detail_dialog: ImageDetailDialog | None = None
@@ -283,6 +286,14 @@ class ImageCard(QFrame):
         favorite_button.setFixedSize(38, 34)
         qconnect(favorite_button.clicked, self._favorite)
         actions.addWidget(favorite_button)
+
+        move_button = QPushButton("↪")
+        move_button.setObjectName("ankingImagesMove")
+        move_button.setAccessibleName("Move image to a subheading")
+        move_button.setToolTip("Move to a subheading or create a new one")
+        move_button.setFixedSize(38, 34)
+        qconnect(move_button.clicked, self._move)
+        actions.addWidget(move_button)
 
         delete_button = QPushButton("🗑️")
         delete_button.setObjectName("ankingImagesDelete")
@@ -337,6 +348,9 @@ class ImageCard(QFrame):
     def _favorite(self) -> None:
         self._on_favorite(self.record)
 
+    def _move(self) -> None:
+        self._on_move(self.record)
+
 
 class CollapsibleSystemSection(QWidget):
     def __init__(
@@ -344,6 +358,7 @@ class CollapsibleSystemSection(QWidget):
         system: str,
         records: list[SavedImage],
         on_favorite: Callable[[SavedImage], None],
+        on_move: Callable[[SavedImage], None],
         on_delete: Callable[[SavedImage], None],
         parent: QWidget | None = None,
         *,
@@ -355,6 +370,7 @@ class CollapsibleSystemSection(QWidget):
         self.title = title or display_system_name(system)
         self.records = records
         self._on_favorite = on_favorite
+        self._on_move = on_move
         self._on_delete = on_delete
         self._built = False
 
@@ -390,6 +406,7 @@ class CollapsibleSystemSection(QWidget):
                         ImageCard(
                             record,
                             self._on_favorite,
+                            self._on_move,
                             self._on_delete,
                             self.content,
                         ),
@@ -427,10 +444,6 @@ class GalleryDialog(QDialog):
 
         root = QVBoxLayout(self)
         heading_row = QHBoxLayout()
-        heading = QLabel("AnKing Images")
-        heading.setObjectName("ankingImagesHeading")
-        heading_row.addWidget(heading)
-        heading_row.addStretch(1)
         self.sync_button = QPushButton("⟳  Sync")
         self.sync_button.setObjectName("ankingImagesSync")
         self.sync_button.setAccessibleName("Sync image catalogue to Anki")
@@ -439,12 +452,21 @@ class GalleryDialog(QDialog):
         )
         self.sync_button.setEnabled(callable(self._on_sync_requested))
         qconnect(self.sync_button.clicked, self._sync_catalogue)
+        header_balance = QWidget()
+        header_balance.setFixedWidth(self.sync_button.sizeHint().width())
+        heading_row.addWidget(header_balance)
+        heading_row.addStretch(1)
+        heading = QLabel("AnKing Images")
+        heading.setObjectName("ankingImagesHeading")
+        heading_row.addWidget(heading)
+        heading_row.addStretch(1)
         heading_row.addWidget(self.sync_button)
         root.addLayout(heading_row)
         description = QLabel(
-            "Saved images are grouped by #AK_Step1_v12::^Systems tags. "
-            "Open a system to view its images. Click Sync to combine the local "
-            "and Anki catalogue selections."
+            "Saved images start in a subheading based on their "
+            "#AK_Step1_v12::^Systems tag. Use ↪ on any image to move it to an "
+            "existing subheading or type a new one. Click Sync to combine the "
+            "local and Anki catalogue selections."
         )
         description.setObjectName("ankingImagesMuted")
         description.setWordWrap(True)
@@ -472,8 +494,7 @@ class GalleryDialog(QDialog):
         records = self.store.all()
         grouped: dict[str, list[SavedImage]] = defaultdict(list)
         for record in records:
-            for system in record.systems or (UNCATEGORIZED_SYSTEM,):
-                grouped[system].append(record)
+            grouped[record.subcategory].append(record)
         favorites = [record for record in records if record.favorite]
 
         container = QWidget()
@@ -485,6 +506,7 @@ class GalleryDialog(QDialog):
                 "__favorites__",
                 favorites,
                 self._favorite_record,
+                self._move_record,
                 self._delete_record,
                 container,
                 title="Favorites",
@@ -500,16 +522,26 @@ class GalleryDialog(QDialog):
             empty.setWordWrap(True)
             layout.addWidget(empty)
         else:
-            for system in sorted(
-                grouped, key=lambda value: display_system_name(value).casefold()
+            for subcategory in sorted(
+                grouped,
+                key=lambda value: (
+                    not bool(value),
+                    display_system_name(value).casefold(),
+                ),
             ):
                 layout.addWidget(
                     CollapsibleSystemSection(
-                        system,
-                        grouped[system],
+                        subcategory or UNCATEGORIZED_SYSTEM,
+                        grouped[subcategory],
                         self._favorite_record,
+                        self._move_record,
                         self._delete_record,
                         container,
+                        title=(
+                            display_system_name(subcategory)
+                            if subcategory
+                            else UNCATEGORIZED_SYSTEM
+                        ),
                     )
                 )
         layout.addStretch(1)
@@ -548,6 +580,39 @@ class GalleryDialog(QDialog):
             self.store.set_favorite(record.record_id, not record.favorite)
         except (KeyError, OSError) as error:
             self.error_label.setText(f"The favorite could not be updated: {error}")
+            self.error_label.show()
+            return
+        self.refresh()
+
+    def _move_record(self, record: SavedImage) -> None:
+        subcategories = sorted(
+            {
+                candidate.subcategory
+                for candidate in self.store.all()
+                if candidate.subcategory
+            },
+            key=str.casefold,
+        )
+        choices = ["", *subcategories]
+        current = (
+            choices.index(record.subcategory)
+            if record.subcategory in choices
+            else 0
+        )
+        selected, accepted = QInputDialog.getItem(
+            self,
+            "Move image to subheading",
+            "Choose a subheading or type a new one. Leave blank for Uncategorized:",
+            choices,
+            current,
+            True,
+        )
+        if not accepted:
+            return
+        try:
+            self.store.set_subcategory(record.record_id, str(selected))
+        except (KeyError, OSError) as error:
+            self.error_label.setText(f"The image could not be moved: {error}")
             self.error_label.show()
             return
         self.refresh()

@@ -76,6 +76,7 @@ QToolButton#ankingImagesSection:hover {
 }
 QPushButton#ankingImagesExport,
 QPushButton#ankingImagesFavorite,
+QPushButton#ankingImagesMove,
 QPushButton#ankingImagesDelete,
 QPushButton#ankingImagesSync {
     background: #0e2b46;
@@ -87,6 +88,7 @@ QPushButton#ankingImagesSync {
 }
 QPushButton#ankingImagesExport:hover,
 QPushButton#ankingImagesFavorite:hover,
+QPushButton#ankingImagesMove:hover,
 QPushButton#ankingImagesDelete:hover,
 QPushButton#ankingImagesSync:hover {
     background: #153b5d;
@@ -94,6 +96,7 @@ QPushButton#ankingImagesSync:hover {
 }
 QPushButton#ankingImagesExport:pressed,
 QPushButton#ankingImagesFavorite:pressed,
+QPushButton#ankingImagesMove:pressed,
 QPushButton#ankingImagesDelete:pressed,
 QPushButton#ankingImagesSync:pressed {
     background: #081a2b;

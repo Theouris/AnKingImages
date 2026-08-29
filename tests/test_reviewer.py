@@ -21,6 +21,9 @@ class FakeNote:
     def items() -> list[tuple[str, str]]:
         return [("Extra", '<img src="heart.jpg">')]
 
+    def __contains__(self, _field_name: object) -> bool:
+        return False
+
 
 class FakeCard:
     id = 20
@@ -95,3 +98,26 @@ def test_reviewer_star_only_changes_csv(tmp_path: Path, monkeypatch: object) -> 
     assert [record.media_filename for record in store.all()] == ["heart.jpg"]
     assert refreshes == [True]
     assert collection.mutation_calls == []
+
+
+def test_reviewer_uses_outline_and_filled_bookmark_markup(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    fake_aqt = ModuleType("aqt")
+    fake_aqt.mw = SimpleNamespace(col=None)
+    monkeypatch.setitem(sys.modules, "aqt", fake_aqt)  # type: ignore[attr-defined]
+    reviewer = importlib.import_module("anking_images.reviewer")
+
+    html = reviewer.augment_card_html(
+        '<img src="heart.jpg">',
+        FakeCard(),
+        "reviewQuestion",
+        SavedImageStore(tmp_path / "saved_images.csv"),
+    )
+
+    assert "function bookmarkIcon(saved)" in html
+    assert "button.innerHTML = bookmarkIcon(saved)" in html
+    assert "saved ? 'currentColor' : 'none'" in html
+    assert "display: inline-flex" in html
+    assert "align-items: center" in html
+    assert "justify-content: center" in html

@@ -15,7 +15,11 @@ from anking_images.catalogue import (
 from anking_images.storage import SavedImage, SavedImageStore
 
 
-def make_record(note_id: int = 10, filename: str = "heart.jpg") -> SavedImage:
+def make_record(
+    note_id: int = 10,
+    filename: str = "heart.jpg",
+    subcategory: str | None = None,
+) -> SavedImage:
     return SavedImage.create(
         note_id=note_id,
         card_id=20,
@@ -32,6 +36,7 @@ def make_record(note_id: int = 10, filename: str = "heart.jpg") -> SavedImage:
         natural_height=800,
         systems=["Cardiovascular"],
         tags=["#AK_Step1_v12::^Systems::Cardiovascular"],
+        subcategory=subcategory,
     )
 
 
@@ -172,14 +177,16 @@ class FakeCollection:
                 card.did = deck_id
 
 
-def test_catalogue_contains_only_deduplicated_image_references() -> None:
+def test_catalogue_contains_deduplicated_image_ids_and_subcategories() -> None:
     record = make_record()
     favorite = SavedImage.from_row({**record.to_row(), "favorite": "1"})
 
     encoded = encode_catalogue([record, favorite])
 
-    assert encoded == '["heart.jpg"]'
-    assert decode_catalogue(encoded) == ["heart.jpg"]
+    assert encoded == (
+        '[{"image_id":"heart.jpg","subcategory":"Cardiovascular"}]'
+    )
+    assert decode_catalogue(encoded) == [("heart.jpg", "Cardiovascular")]
 
 
 def test_old_metadata_catalogue_is_read_as_compact_references() -> None:
@@ -189,7 +196,13 @@ def test_old_metadata_catalogue_is_read_as_compact_references() -> None:
         "records": [make_record().to_row()],
     }
 
-    assert decode_catalogue(json.dumps(old_payload)) == ["heart.jpg"]
+    assert decode_catalogue(json.dumps(old_payload)) == [
+        ("heart.jpg", "Cardiovascular")
+    ]
+
+
+def test_old_compact_catalogue_defaults_to_uncategorized() -> None:
+    assert decode_catalogue('["heart.jpg"]') == [("heart.jpg", "")]
 
 
 def test_setup_creates_standalone_suspended_sync_card(tmp_path: Path) -> None:
@@ -202,7 +215,9 @@ def test_setup_creates_standalone_suspended_sync_card(tmp_path: Path) -> None:
     note = collection.notes[100]
     assert collection.decks.created_names == [DECK_NAME]
     assert note.guid == SYNC_GUID
-    assert decode_catalogue(note[CATALOGUE_FIELD]) == ["heart.jpg"]
+    assert decode_catalogue(note[CATALOGUE_FIELD]) == [
+        ("heart.jpg", "Cardiovascular")
+    ]
     assert [(card.did, card.queue) for card in collection.cards] == [(55, -1)]
 
 
@@ -224,8 +239,8 @@ def test_synced_card_and_csv_are_pooled_and_saved_to_both(tmp_path: Path) -> Non
     assert records["heart.jpg"] == first
     assert records["brain.jpg"].note_id == 0
     assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
-        "brain.jpg",
-        "heart.jpg",
+        ("brain.jpg", "Cardiovascular"),
+        ("heart.jpg", "Cardiovascular"),
     ]
 
 
@@ -246,8 +261,8 @@ def test_explicit_sync_pools_card_and_csv_names(tmp_path: Path) -> None:
         "heart.jpg",
     }
     assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
-        "brain.jpg",
-        "heart.jpg",
+        ("brain.jpg", "Cardiovascular"),
+        ("heart.jpg", "Cardiovascular"),
     ]
 
 
@@ -264,7 +279,9 @@ def test_old_metadata_card_is_rewritten_in_compact_format(tmp_path: Path) -> Non
 
     sync.setup_and_pull(collection)
 
-    assert note[CATALOGUE_FIELD] == '["heart.jpg"]'
+    assert decode_catalogue(note[CATALOGUE_FIELD]) == [
+        ("heart.jpg", "Cardiovascular")
+    ]
 
 
 def test_local_change_rewrites_existing_sync_note_with_references_only(
@@ -281,8 +298,8 @@ def test_local_change_rewrites_existing_sync_note_with_references_only(
     sync.write(collection)
 
     assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
-        "brain.jpg",
-        "heart.jpg",
+        ("brain.jpg", "Cardiovascular"),
+        ("heart.jpg", "Cardiovascular"),
     ]
 
 
@@ -295,7 +312,9 @@ def test_first_write_preserves_the_existing_review_undo_step(tmp_path: Path) -> 
     CatalogueSync(store).write(collection)
 
     assert collection.merged_undo_steps == [42]
-    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == ["heart.jpg"]
+    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
+        ("heart.jpg", "Cardiovascular")
+    ]
 
 
 def test_old_anki_write_fallback_does_not_create_an_undo_entry(
@@ -315,3 +334,37 @@ def test_old_anki_write_fallback_does_not_create_an_undo_entry(
     sync.write(collection)
 
     assert note.flushed is True
+
+
+def test_existing_moved_catalogue_card_does_not_recreate_or_move_deck(
+    tmp_path: Path,
+) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    collection = FakeCollection()
+    sync = CatalogueSync(store)
+    sync.setup_and_pull(collection)
+    collection.cards[0].did = 99
+    collection.decks.created_names.clear()
+
+    sync.setup_and_pull(collection)
+
+    assert collection.decks.created_names == []
+    assert collection.cards[0].did == 99
+
+
+def test_csv_subcategory_wins_over_catalogue_card(tmp_path: Path) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    local = make_record(subcategory="Local heading")
+    remote = make_record(subcategory="Remote heading")
+    store.toggle(local)
+    collection = FakeCollection()
+    sync = CatalogueSync(store)
+    sync.setup_and_pull(collection)
+    collection.notes[100][CATALOGUE_FIELD] = encode_catalogue([remote])
+
+    sync.setup_and_pull(collection)
+
+    assert store.all()[0].subcategory == "Local heading"
+    assert decode_catalogue(collection.notes[100][CATALOGUE_FIELD]) == [
+        ("heart.jpg", "Local heading")
+    ]

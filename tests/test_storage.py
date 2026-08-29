@@ -51,6 +51,7 @@ def test_missing_system_becomes_uncategorized(tmp_path: Path) -> None:
     store = SavedImageStore(tmp_path / "saved_images.csv")
     assert store.toggle(make_record(system=""))
     assert store.all()[0].systems == ("Uncategorized",)
+    assert store.all()[0].subcategory == ""
 
 
 def test_delete_removes_record_and_persists(tmp_path: Path) -> None:
@@ -74,6 +75,21 @@ def test_favorite_round_trip(tmp_path: Path) -> None:
     assert SavedImageStore(path).all()[0].favorite is True
     assert store.set_favorite(record.record_id, False) is False
     assert SavedImageStore(path).all()[0].favorite is False
+
+
+def test_subcategory_round_trip_and_move(tmp_path: Path) -> None:
+    path = tmp_path / "saved_images.csv"
+    store = SavedImageStore(path)
+    record = make_record()
+    store.toggle(record)
+
+    assert record.subcategory == "Cardiovascular"
+    assert store.set_subcategory(record.record_id, "  Custom heading  ") == (
+        "Custom heading"
+    )
+    assert SavedImageStore(path).all()[0].subcategory == "Custom heading"
+    assert store.set_subcategory(record.record_id, "") == ""
+    assert SavedImageStore(path).all()[0].subcategory == ""
 
 
 def test_old_csv_without_favorite_column_defaults_to_false(tmp_path: Path) -> None:
@@ -112,6 +128,17 @@ def test_compact_catalogue_references_preserve_local_metadata(tmp_path: Path) ->
     assert records[existing.media_filename] == existing
     assert records["remote.png"].note_id == 0
     assert records["remote.png"].systems == ("Uncategorized",)
+
+
+def test_catalogue_entries_apply_remote_subcategory(tmp_path: Path) -> None:
+    path = tmp_path / "saved_images.csv"
+    store = SavedImageStore(path)
+
+    store.replace_catalogue_entries([("remote.png", "Neurology")])
+
+    record = SavedImageStore(path).all()[0]
+    assert record.media_filename == "remote.png"
+    assert record.subcategory == "Neurology"
 
 
 def test_saved_selection_is_image_based_across_notes(tmp_path: Path) -> None:

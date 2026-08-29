@@ -47,12 +47,21 @@ STAR_STYLE = """
     background: transparent;
     color: #8b919a;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font: 22px/1 sans-serif;
     margin: 3px 0 1px;
     min-height: 26px;
     min-width: 26px;
-    padding: 1px 3px 3px;
+    padding: 0;
     text-align: center;
+  }
+  .anking-images-star svg {
+    display: block;
+    height: 21px;
+    pointer-events: none;
+    width: 18px;
   }
   .anking-images-star:hover,
   .anking-images-star:focus-visible {
@@ -128,9 +137,14 @@ def augment_card_html(
     return value.slice(value.lastIndexOf("/") + 1);
   }}
 
+  function bookmarkIcon(saved) {{
+    const path = '<path d="M5 3.5h10a1 1 0 0 1 1 1v15.8l-6-3.8-6 3.8V4.5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="' + (saved ? 'currentColor' : 'none') + '"></path>';
+    return '<svg viewBox="0 0 20 24" aria-hidden="true" focusable="false">' + path + '</svg>';
+  }}
+
   function setSaved(button, saved) {{
     button.dataset.saved = saved ? "true" : "false";
-    button.textContent = saved ? "★" : "☆";
+    button.innerHTML = bookmarkIcon(saved);
     button.title = saved ? "Remove from My Images" : "Save to My Images";
     button.setAttribute("aria-label", button.title);
     button.setAttribute("aria-pressed", saved ? "true" : "false");

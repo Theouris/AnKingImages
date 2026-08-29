@@ -32,6 +32,7 @@ CSV_COLUMNS = (
     "natural_height",
     "systems",
     "tags",
+    "subcategory",
     "favorite",
 )
 
@@ -82,6 +83,7 @@ class SavedImage:
     natural_height: int = 0
     systems: tuple[str, ...] = field(default_factory=tuple)
     tags: tuple[str, ...] = field(default_factory=tuple)
+    subcategory: str = ""
     favorite: bool = False
 
     @classmethod
@@ -103,8 +105,21 @@ class SavedImage:
         natural_height: int,
         systems: Iterable[str],
         tags: Iterable[str],
+        subcategory: str | None = None,
     ) -> "SavedImage":
         filename = normalize_media_filename(media_filename or image_src)
+        normalized_systems = tuple(
+            dict.fromkeys(str(value) for value in systems if value)
+        )
+        if subcategory is None:
+            subcategory = next(
+                (
+                    value
+                    for value in normalized_systems
+                    if value != UNCATEGORIZED_SYSTEM
+                ),
+                "",
+            )
         return cls(
             record_id=record_id_for(note_id, filename, image_src),
             saved_at_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -123,8 +138,9 @@ class SavedImage:
             rendered_height=_int(rendered_height),
             natural_width=_int(natural_width),
             natural_height=_int(natural_height),
-            systems=tuple(dict.fromkeys(str(value) for value in systems if value)),
+            systems=normalized_systems,
             tags=tuple(dict.fromkeys(str(value) for value in tags if value)),
+            subcategory=str(subcategory or "").strip(),
         )
 
     def to_row(self) -> dict[str, str]:
@@ -146,6 +162,7 @@ class SavedImage:
             "natural_height": str(self.natural_height),
             "systems": _json_list(self.systems),
             "tags": _json_list(self.tags),
+            "subcategory": self.subcategory,
             "favorite": "1" if self.favorite else "0",
         }
 
@@ -158,6 +175,15 @@ class SavedImage:
         record_id = row.get("record_id", "") or record_id_for(
             note_id, media_filename, row.get("image_src", "")
         )
+        systems = _parse_list(row.get("systems", ""))
+        raw_subcategory = row.get("subcategory")
+        if raw_subcategory is None:
+            # CSVs created before subheadings existed retain their old gallery
+            # grouping by adopting their first system as the initial subheading.
+            raw_subcategory = next(
+                (value for value in systems if value != UNCATEGORIZED_SYSTEM),
+                "",
+            )
         return cls(
             record_id=record_id,
             saved_at_utc=row.get("saved_at_utc", ""),
@@ -174,14 +200,15 @@ class SavedImage:
             rendered_height=_int(row.get("rendered_height")),
             natural_width=_int(row.get("natural_width")),
             natural_height=_int(row.get("natural_height")),
-            systems=_parse_list(row.get("systems", "")),
+            systems=systems,
             tags=_parse_list(row.get("tags", "")),
+            subcategory=str(raw_subcategory or "").strip(),
             favorite=_bool(row.get("favorite", "")),
         )
 
 
 def catalogue_reference(record: SavedImage) -> str:
-    """Return the sole value persisted on the Anki catalogue card."""
+    """Return the image-ID portion persisted on the Anki catalogue card."""
 
     return record.media_filename or record.image_src
 
@@ -296,6 +323,20 @@ class SavedImageStore:
                 self._write_locked()
             return desired
 
+    def set_subcategory(self, record_id: str, subcategory: str) -> str:
+        """Move an image to a subheading and return its normalized name."""
+
+        with self._lock:
+            key = str(record_id)
+            if key not in self._records:
+                raise KeyError(key)
+            normalized = str(subcategory or "").strip()
+            current = self._records[key]
+            if current.subcategory != normalized:
+                self._records[key] = replace(current, subcategory=normalized)
+                self._write_locked()
+            return normalized
+
     def replace_all(self, records: Iterable[SavedImage]) -> None:
         """Replace the catalogue and atomically rewrite the CSV."""
 
@@ -345,7 +386,57 @@ class SavedImageStore:
                         natural_height=0,
                         systems=[UNCATEGORIZED_SYSTEM],
                         tags=[],
+                        subcategory="",
                     )
+                replacement[record.record_id] = record
+
+            self._records = replacement
+            self.load_errors = []
+            self._write_locked()
+
+    def replace_catalogue_entries(
+        self, entries: Iterable[tuple[str, str]]
+    ) -> None:
+        """Mirror image/subheading pairs while retaining rich local metadata."""
+
+        with self._lock:
+            desired: dict[str, str] = {}
+            for raw_reference, raw_subcategory in entries:
+                reference = str(raw_reference or "").strip()
+                if reference and reference not in desired:
+                    desired[reference] = str(raw_subcategory or "").strip()
+
+            local_by_reference: dict[str, SavedImage] = {}
+            for record in self._records.values():
+                reference = catalogue_reference(record)
+                if reference and reference not in local_by_reference:
+                    local_by_reference[reference] = record
+
+            replacement: dict[str, SavedImage] = {}
+            for reference, subcategory in desired.items():
+                record = local_by_reference.get(reference)
+                if record is None:
+                    filename = normalize_media_filename(reference)
+                    record = SavedImage.create(
+                        note_id=0,
+                        card_id=0,
+                        deck_name="",
+                        note_type="",
+                        field_names=[],
+                        image_src=reference,
+                        media_filename=filename,
+                        alt_text="",
+                        image_title="",
+                        rendered_width=0,
+                        rendered_height=0,
+                        natural_width=0,
+                        natural_height=0,
+                        systems=[UNCATEGORIZED_SYSTEM],
+                        tags=[],
+                        subcategory=subcategory,
+                    )
+                elif record.subcategory != subcategory:
+                    record = replace(record, subcategory=subcategory)
                 replacement[record.record_id] = record
 
             self._records = replacement
