@@ -317,6 +317,48 @@ def test_first_write_preserves_the_existing_review_undo_step(tmp_path: Path) -> 
     ]
 
 
+def test_stale_review_undo_step_does_not_report_a_sync_failure(
+    tmp_path: Path,
+) -> None:
+    class InvalidInput(Exception):
+        pass
+
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    store.toggle(make_record())
+    collection = FakeCollection()
+    collection.undo_status_value = SimpleNamespace(undo="Review", last_step=42)
+
+    def reject_stale_step(_step: int) -> None:
+        raise InvalidInput("target undo op not found")
+
+    collection.merge_undo_entries = reject_stale_step  # type: ignore[method-assign]
+
+    note_id = CatalogueSync(store).write(collection)
+
+    assert note_id == 100
+    assert decode_catalogue(collection.notes[note_id][CATALOGUE_FIELD]) == [
+        ("heart.jpg", "Cardiovascular")
+    ]
+
+
+def test_unexpected_undo_merge_failure_is_not_hidden(tmp_path: Path) -> None:
+    store = SavedImageStore(tmp_path / "saved_images.csv")
+    collection = FakeCollection()
+    collection.undo_status_value = SimpleNamespace(undo="Review", last_step=42)
+
+    def fail_merge(_step: int) -> None:
+        raise RuntimeError("unexpected merge failure")
+
+    collection.merge_undo_entries = fail_merge  # type: ignore[method-assign]
+
+    try:
+        CatalogueSync(store).write(collection)
+    except RuntimeError as error:
+        assert str(error) == "unexpected merge failure"
+    else:
+        raise AssertionError("unexpected undo merge errors must be raised")
+
+
 def test_old_anki_write_fallback_does_not_create_an_undo_entry(
     tmp_path: Path,
 ) -> None:

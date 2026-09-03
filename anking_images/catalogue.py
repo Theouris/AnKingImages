@@ -173,6 +173,17 @@ class CatalogueSync:
             # Older Anki releases do not expose undo merging. Their note-update
             # fallback still avoids adding a separate update operation.
             pass
+        except Exception as error:
+            # The catalogue mutation has already completed at this point. Anki
+            # can discard or merge the captured step in the meantime (for
+            # example, while another add-on is handling review undo entries).
+            # Do not turn that best-effort undo cleanup into a sync failure.
+            if (
+                error.__class__.__name__ == "InvalidInput"
+                and str(error).strip().casefold() == "target undo op not found"
+            ):
+                return
+            raise
 
     def _ensure_notetype(self, collection: Any) -> dict[str, Any]:
         models = collection.models
